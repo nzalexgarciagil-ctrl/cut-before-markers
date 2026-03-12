@@ -2,8 +2,6 @@
 
 Premiere Pro extension. Put markers on your timeline, run this, and it cuts X seconds before each one.
 
-Works well for gaming edits — drop a marker on every kill, run it, done.
-
 ## Install
 
 ### Windows
