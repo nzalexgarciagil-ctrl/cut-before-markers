@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    background: #1e1e1e;
+    color: #d0d0d0;
+    padding: 18px;
+    font-size: 13px;
+  }
+
+  h2 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .sub { color: #777; font-size: 12px; margin-bottom: 18px; }
+
+  label { display: block; margin-bottom: 6px; color: #aaa; font-size: 12px; }
+
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+
+  input[type="number"] {
+    width: 70px; padding: 6px 8px;
+    background: #2d2d2d; border: 1px solid #444; border-radius: 4px;
+    color: #fff; font-size: 14px; text-align: center;
+  }
+  input[type="number"]:focus { outline: none; border-color: #aaa; }
+  .unit { color: #666; font-size: 12px; }
+
+  button {
+    width: 100%; padding: 10px;
+    background: #fff; color: #111;
+    border: none; border-radius: 5px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover   { background: #e0e0e0; }
+  button:active  { background: #bbb; }
+  button:disabled { background: #333; color: #555; cursor: default; }
+
+  #status {
+    margin-top: 12px; font-size: 12px; color: #888;
+    min-height: 16px; white-space: pre-wrap; line-height: 1.5;
+  }
+  #status.ok  { color: #ccc; }
+  #status.err { color: #ff6b6b; }
+
+  .debug-toggle {
+    margin-top: 14px; font-size: 11px; color: #555;
+    cursor: pointer; user-select: none;
+  }
+  .debug-toggle:hover { color: #888; }
+
+  #debugBox {
+    display: none;
+    margin-top: 8px;
+    background: #111; border: 1px solid #333; border-radius: 4px;
+    padding: 8px; font-size: 11px; color: #aaa;
+    max-height: 120px; overflow-y: auto;
+    font-family: 'Consolas', monospace;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<h2>Cut Before Markers</h2>
+<p class="sub">Razor-cuts the timeline X seconds before every sequence marker.</p>
+
+<label>Seconds before each marker</label>
+<div class="row">
+  <input type="number" id="secs" value="15" min="0.1" step="0.5">
+  <span class="unit">seconds</span>
+</div>
+
+<button id="runBtn" onclick="run()">Run Cut</button>
+<div id="status"></div>
+
+<div class="debug-toggle" onclick="toggleDebug()">▸ Debug log</div>
+<div id="debugBox"></div>
+
+<script src="CSInterface.js"></script>
+<script>
+var cs = new CSInterface();
+var hostLoaded = false;
+var debugVisible = false;
+
+function log(msg) {
+  var box = document.getElementById('debugBox');
+  box.textContent += '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
+  box.scrollTop = box.scrollHeight;
+}
+
+function toggleDebug() {
+  debugVisible = !debugVisible;
+  document.getElementById('debugBox').style.display = debugVisible ? 'block' : 'none';
+  document.querySelector('.debug-toggle').textContent = (debugVisible ? '▾' : '▸') + ' Debug log';
+}
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = type || '';
+}
+
+// Load host.jsx once on startup
+function loadHost(callback) {
+  if (hostLoaded) { callback(); return; }
+  log('Loading host.jsx...');
+  cs.evalFile('./host.jsx');
+  // evalFile has no callback — wait a moment then proceed
+  setTimeout(function() {
+    hostLoaded = true;
+    log('host.jsx loaded.');
+    callback();
+  }, 600);
+}
+
+function run() {
+  var secs = parseFloat(document.getElementById('secs').value);
+  if (isNaN(secs) || secs <= 0) {
+    setStatus('Enter a valid number of seconds.', 'err');
+    return;
+  }
+
+  var btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  setStatus('');
+  log('Run clicked — ' + secs + 's before each marker');
+
+  // Timeout safety net
+  var timedOut = false;
+  var timer = setTimeout(function() {
+    timedOut = true;
+    btn.disabled = false;
+    btn.textContent = 'Run Cut';
+    setStatus('Timed out — check debug log for details.', 'err');
+    log('ERROR: evalScript timed out after 20s');
+  }, 20000);
+
+  loadHost(function() {
+    log('Calling cutBeforeMarkers(' + secs + ')...');
+    cs.evalScript('cutBeforeMarkers(' + secs + ')', function(raw) {
+      if (timedOut) return;
+      clearTimeout(timer);
+      btn.disabled = false;
+      btn.textContent = 'Run Cut';
+      log('Response: ' + raw);
+      try {
+        var r = JSON.parse(raw);
+        if (!r.success) {
+          setStatus('Error: ' + r.error, 'err');
+        } else {
+          var msg = 'Done!  ' + r.cuts + ' cut' + (r.cuts !== 1 ? 's' : '') + ' made';
+          if (r.skipped > 0) msg += '\n' + r.skipped + ' marker' + (r.skipped !== 1 ? 's' : '') + ' skipped (too close to start)';
+          setStatus(msg, 'ok');
+          log('fps=' + r.fps + '  markers=' + r.markers + '  cuts=' + r.cuts + '  skipped=' + r.skipped);
+        }
+      } catch(e) {
+        setStatus('Unexpected response — see debug log.', 'err');
+        log('Parse error: ' + e + ' | raw: ' + raw);
+      }
+    });
+  });
+}
+</script>
+
+</body>
+</html>
