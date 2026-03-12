@@ -83,7 +83,6 @@
 <script src="CSInterface.js"></script>
 <script>
 var cs = new CSInterface();
-var hostLoaded = false;
 var debugVisible = false;
 
 function log(msg) {
@@ -104,19 +103,6 @@ function setStatus(msg, type) {
   el.className = type || '';
 }
 
-// Load host.jsx once on startup
-function loadHost(callback) {
-  if (hostLoaded) { callback(); return; }
-  log('Loading host.jsx...');
-  cs.evalFile('./host.jsx');
-  // evalFile has no callback — wait a moment then proceed
-  setTimeout(function() {
-    hostLoaded = true;
-    log('host.jsx loaded.');
-    callback();
-  }, 600);
-}
-
 function run() {
   var secs = parseFloat(document.getElementById('secs').value);
   if (isNaN(secs) || secs <= 0) {
@@ -130,19 +116,33 @@ function run() {
   setStatus('');
   log('Run clicked — ' + secs + 's before each marker');
 
-  // Timeout safety net
-  var timedOut = false;
-  var timer = setTimeout(function() {
-    timedOut = true;
-    btn.disabled = false;
-    btn.textContent = 'Run Cut';
-    setStatus('Timed out — check debug log for details.', 'err');
-    log('ERROR: evalScript timed out after 20s');
-  }, 20000);
+  // Load host.jsx via XHR so we get a real callback (evalFile blocks)
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', './host.jsx', true);
+  xhr.onload = function() {
+    if (xhr.status !== 200 && xhr.status !== 0) {
+      log('ERROR: Could not load host.jsx (status ' + xhr.status + ')');
+      setStatus('Could not load host script.', 'err');
+      btn.disabled = false; btn.textContent = 'Run Cut';
+      return;
+    }
+    log('host.jsx loaded (' + xhr.responseText.length + ' bytes)');
 
-  loadHost(function() {
-    log('Calling cutBeforeMarkers(' + secs + ')...');
-    cs.evalScript('cutBeforeMarkers(' + secs + ')', function(raw) {
+    // Append the function call and run the whole thing in one evalScript
+    var script = xhr.responseText + '\ncutBeforeMarkers(' + secs + ')';
+
+    // Timeout safety net
+    var timedOut = false;
+    var timer = setTimeout(function() {
+      timedOut = true;
+      btn.disabled = false;
+      btn.textContent = 'Run Cut';
+      setStatus('Timed out — check debug log.', 'err');
+      log('ERROR: evalScript timed out after 20s');
+    }, 20000);
+
+    log('Calling evalScript...');
+    cs.evalScript(script, function(raw) {
       if (timedOut) return;
       clearTimeout(timer);
       btn.disabled = false;
@@ -163,7 +163,13 @@ function run() {
         log('Parse error: ' + e + ' | raw: ' + raw);
       }
     });
-  });
+  };
+  xhr.onerror = function() {
+    log('ERROR: XHR failed loading host.jsx');
+    setStatus('Could not load host script.', 'err');
+    btn.disabled = false; btn.textContent = 'Run Cut';
+  };
+  xhr.send();
 }
 </script>
 
