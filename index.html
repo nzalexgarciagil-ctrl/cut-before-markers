@@ -45,22 +45,6 @@
   }
   #status.ok  { color: #ccc; }
   #status.err { color: #ff6b6b; }
-
-  .debug-toggle {
-    margin-top: 14px; font-size: 11px; color: #555;
-    cursor: pointer; user-select: none;
-  }
-  .debug-toggle:hover { color: #888; }
-
-  #debugBox {
-    display: none;
-    margin-top: 8px;
-    background: #111; border: 1px solid #333; border-radius: 4px;
-    padding: 8px; font-size: 11px; color: #aaa;
-    max-height: 120px; overflow-y: auto;
-    font-family: 'Consolas', monospace;
-    white-space: pre-wrap;
-  }
 </style>
 </head>
 <body>
@@ -77,25 +61,9 @@
 <button id="runBtn" onclick="run()">Run Cut</button>
 <div id="status"></div>
 
-<div class="debug-toggle" onclick="toggleDebug()">▸ Debug log</div>
-<div id="debugBox"></div>
-
 <script src="CSInterface.js"></script>
 <script>
 var cs = new CSInterface();
-var debugVisible = false;
-
-function log(msg) {
-  var box = document.getElementById('debugBox');
-  box.textContent += '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
-  box.scrollTop = box.scrollHeight;
-}
-
-function toggleDebug() {
-  debugVisible = !debugVisible;
-  document.getElementById('debugBox').style.display = debugVisible ? 'block' : 'none';
-  document.querySelector('.debug-toggle').textContent = (debugVisible ? '▾' : '▸') + ' Debug log';
-}
 
 function setStatus(msg, type) {
   var el = document.getElementById('status');
@@ -114,40 +82,31 @@ function run() {
   btn.disabled = true;
   btn.textContent = 'Running...';
   setStatus('');
-  log('Run clicked — ' + secs + 's before each marker');
 
-  // Load host.jsx via XHR so we get a real callback (evalFile blocks)
   var xhr = new XMLHttpRequest();
   xhr.open('GET', './host.jsx', true);
   xhr.onload = function() {
     if (xhr.status !== 200 && xhr.status !== 0) {
-      log('ERROR: Could not load host.jsx (status ' + xhr.status + ')');
       setStatus('Could not load host script.', 'err');
       btn.disabled = false; btn.textContent = 'Run Cut';
       return;
     }
-    log('host.jsx loaded (' + xhr.responseText.length + ' bytes)');
 
-    // Append the function call and run the whole thing in one evalScript
     var script = xhr.responseText + '\ncutBeforeMarkers(' + secs + ')';
 
-    // Timeout safety net
     var timedOut = false;
     var timer = setTimeout(function() {
       timedOut = true;
       btn.disabled = false;
       btn.textContent = 'Run Cut';
-      setStatus('Timed out — check debug log.', 'err');
-      log('ERROR: evalScript timed out after 20s');
+      setStatus('Timed out. Is a sequence open?', 'err');
     }, 20000);
 
-    log('Calling evalScript...');
     cs.evalScript(script, function(raw) {
       if (timedOut) return;
       clearTimeout(timer);
       btn.disabled = false;
       btn.textContent = 'Run Cut';
-      log('Response: ' + raw);
       try {
         var r = JSON.parse(raw);
         if (!r.success) {
@@ -156,16 +115,13 @@ function run() {
           var msg = 'Done!  ' + r.cuts + ' cut' + (r.cuts !== 1 ? 's' : '') + ' made';
           if (r.skipped > 0) msg += '\n' + r.skipped + ' marker' + (r.skipped !== 1 ? 's' : '') + ' skipped (too close to start)';
           setStatus(msg, 'ok');
-          log('fps=' + r.fps + '  markers=' + r.markers + '  cuts=' + r.cuts + '  skipped=' + r.skipped);
         }
       } catch(e) {
-        setStatus('Unexpected response — see debug log.', 'err');
-        log('Parse error: ' + e + ' | raw: ' + raw);
+        setStatus('Error: ' + raw, 'err');
       }
     });
   };
   xhr.onerror = function() {
-    log('ERROR: XHR failed loading host.jsx');
     setStatus('Could not load host script.', 'err');
     btn.disabled = false; btn.textContent = 'Run Cut';
   };
